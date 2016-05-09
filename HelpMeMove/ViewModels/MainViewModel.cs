@@ -1,5 +1,4 @@
-﻿using Esri.ArcGISRuntime.ArcGISServices;
-using Esri.ArcGISRuntime.Controls;
+﻿using Esri.ArcGISRuntime.Controls;
 using Esri.ArcGISRuntime.Data;
 using Esri.ArcGISRuntime.Geometry;
 using Esri.ArcGISRuntime.Layers;
@@ -8,7 +7,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -17,6 +15,9 @@ using System.Windows.Input;
 
 namespace HelpMeMove.ViewModels
 {
+    /// <summary>
+    /// Main view model handles most of the logic of the application
+    /// </summary>
     class MainViewModel: INotifyPropertyChanged
     {
         public SurveyResult surveyResult = new SurveyResult();
@@ -35,8 +36,14 @@ namespace HelpMeMove.ViewModels
             _map.InitialViewpoint = initViewPoint;
 
             _canExecute = true;
+            //do not display the progress bar or the results list
+            ProgressOverlayVisibility = Visibility.Collapsed;
+            TapestryLinksVisibility = Visibility.Collapsed;
         }
 
+        #region Declare Properties 
+
+        //get a handle on the map for the application
         private Map _map;
         public Map Map
         {
@@ -49,7 +56,56 @@ namespace HelpMeMove.ViewModels
             }
         }
 
+        //visibility property for the progress bar 
+        private Visibility _progressOverlayVisibility = Visibility.Visible;
+        public Visibility ProgressOverlayVisibility
+        {
+            get
+            {
+                return _progressOverlayVisibility;
+            }
+            set
+            {
+                if (_progressOverlayVisibility != value)
+                {
+                    _progressOverlayVisibility = value;
+                    NotifyPropertyChanged("ProgressOverlayVisibility");
+                }
+            }
+        }
+
+        //visibility property for the results listbox
+        private Visibility _tapestryLinksVisibility;
+        public Visibility TapestryLinksVisibility
+    {
+            get { return _tapestryLinksVisibility; }
+            set {
+                if (_tapestryLinksVisibility != value)
+                {
+                    _tapestryLinksVisibility = value;
+                    NotifyPropertyChanged("TapestryLinksVisibility");
+                }
+            }
+        }
+
+        //collection of the returned tapestry objects
+        private ObservableCollection<Tapestry> tapestryNames;
+        public ObservableCollection<Tapestry> TapestryNames
+        {
+            get { return tapestryNames; }
+            set
+            {
+                if (tapestryNames != value)
+                {
+                    tapestryNames = value;
+                    NotifyPropertyChanged("TapestryNames");
+                }
+            }
+        }
+
         #region Properties for Combo Boxes
+
+        //property holding the age value
         protected string selectedAgeValue;
         public string SelectedAgeValue
         {
@@ -64,6 +120,7 @@ namespace HelpMeMove.ViewModels
             }
         }
         
+        //property holding the marital status value
         protected string selectedMaritalStatus;
         public string SelectedMaritalStatus
         {
@@ -78,6 +135,7 @@ namespace HelpMeMove.ViewModels
             }
         }
 
+        //property holding the household size value
         protected string selectedHouseholdSizeValue;
         public string SelectedHouseholdSizeValue
         {
@@ -92,7 +150,7 @@ namespace HelpMeMove.ViewModels
             }
         }
         
-
+        //property holding the income value
         protected string selectedIncomeValue;
         public string SelectedIncomeValue
         {
@@ -110,6 +168,8 @@ namespace HelpMeMove.ViewModels
         #endregion
 
         #region Properties for Radio Buttons
+
+        //TODO: make this part more efficient, it should not require 2 separate properties
 
         private bool isMale;
         public bool IsMale
@@ -147,6 +207,9 @@ namespace HelpMeMove.ViewModels
 
         #endregion
 
+        #endregion
+
+        // property bound to the click command for the Submit button
         private ICommand _clickCommand;
         public ICommand ClickCommand
         {
@@ -157,38 +220,36 @@ namespace HelpMeMove.ViewModels
         }
 
         private bool _canExecute;
-
-        private ObservableCollection<Tapestry> tapestryNames;
-        public ObservableCollection<Tapestry> TapestryNames
-        {
-            get { return tapestryNames; }
-            set
-            {
-                if (tapestryNames != value)
-                {
-                    tapestryNames = value;
-                    NotifyPropertyChanged("TapestryNames");
-                }
-            }
-        }
-
-
+        /// <summary>
+        /// Queries the Demographics layer for all the features that meet the user selected criteria
+        /// </summary>
+        /// <param name="mapView">Main MapView</param>
+        /// <returns>QueryResult from the Demographics query</returns>
         public async Task<QueryResult> GetDemographics(MapView mapView)
         {
             // demographics layer query
             string demoQueryString = surveyResult.CreateDemoQueryString();
             if (demoQueryString != "1=0")
             {
-                QueryTask demoQueryTask = new QueryTask(
-                    new Uri("http://sampleserver1.arcgisonline.com/ArcGIS/rest/services/Demographics/ESRI_Census_USA/MapServer/1"));
-                Query demoQuery = new Query(demoQueryString)
+                try
                 {
-                    Geometry = mapView.Extent,
-                    ReturnGeometry = true,
-                    OutSpatialReference = mapView.SpatialReference
-                };
-                var demoResult = await demoQueryTask.ExecuteAsync(demoQuery);
-                return demoResult;
+                    //set up and run query
+                    QueryTask demoQueryTask = new QueryTask(
+                        new Uri("http://sampleserver1.arcgisonline.com/ArcGIS/rest/services/Demographics/ESRI_Census_USA/MapServer/1"));
+                    Query demoQuery = new Query(demoQueryString)
+                    {
+                        Geometry = mapView.Extent,
+                        ReturnGeometry = true,
+                        OutSpatialReference = mapView.SpatialReference
+                    };
+                    var demoResult = await demoQueryTask.ExecuteAsync(demoQuery);
+                    return demoResult;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(string.Format("Unable to process the Demographics data. The Server returned the following message: {}",ex.Message, "Dmographics Error"));
+                    return null;
+                }
             }
             return null;
         }
@@ -241,6 +302,9 @@ namespace HelpMeMove.ViewModels
         // click event for Submit button
         public async void SubmitButtonAction(MapView mapView)
         {
+            ProgressOverlayVisibility = Visibility.Visible;
+            TapestryLinksVisibility = Visibility.Visible;
+
             // keep track of already mapped tapestry polygons
             List<int> MappedOIDs = new List<int>();
             TapestryNames = new ObservableCollection<Tapestry>();
@@ -315,6 +379,8 @@ namespace HelpMeMove.ViewModels
                         }
                     }
                 }
+                //hide progress overlay 
+                ProgressOverlayVisibility = Visibility.Collapsed;
             }
             catch (Exception ex)
             {
