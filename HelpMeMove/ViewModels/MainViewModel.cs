@@ -247,56 +247,82 @@ namespace HelpMeMove.ViewModels
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(string.Format("Unable to process the Demographics data. The Server returned the following message: {}",ex.Message, "Dmographics Error"));
+                    MessageBox.Show(string.Format("Unable to process the Demographics data. The Server returned the following message: {0}",ex.Message, "Dmographics Error"));
                     return null;
                 }
             }
             return null;
         }
 
+        /// <summary>
+        /// Queries the Income layer for all the features that meet the user selected criteria
+        /// </summary>
+        /// <param name="mapView">Main MapView</param>
+        /// <returns>QueryResult from the Income query</returns>
         public async Task<Geometry> GetIncome(MapView mapView)
         {
             // income layer query
             string incomeQueryString = surveyResult.CreateIncomeQueryString();
             if (incomeQueryString != "1=0")
             {
-                QueryTask incomeQueryTask = new QueryTask(
-                    new Uri("http://services.arcgisonline.com/arcgis/rest/services/Demographics/USA_Median_Household_Income/MapServer/1"));
-                Query incomeQuery = new Query(incomeQueryString)
+                try
                 {
-                    Geometry = mapView.Extent,
-                    ReturnGeometry = true,
-                    OutSpatialReference = mapView.SpatialReference
-                };
+                    QueryTask incomeQueryTask = new QueryTask(
+                        new Uri("http://services.arcgisonline.com/arcgis/rest/services/Demographics/USA_Median_Household_Income/MapServer/1"));
+                    Query incomeQuery = new Query(incomeQueryString)
+                    {
+                        Geometry = mapView.Extent,
+                        ReturnGeometry = true,
+                        OutSpatialReference = mapView.SpatialReference
+                    };
 
-                var incomeResult = await incomeQueryTask.ExecuteAsync(incomeQuery);
-                //create a multipart polygon for intersection
-                if (incomeResult.FeatureSet.Features.Count > 0)
-                {
-                    return GeometryEngine.Union(incomeResult.FeatureSet.Features.Select(i => i.Geometry));
+                    var incomeResult = await incomeQueryTask.ExecuteAsync(incomeQuery);
+                    //create a multipart polygon for intersection
+                    if (incomeResult.FeatureSet.Features.Count > 0)
+                    {
+                        return GeometryEngine.Union(incomeResult.FeatureSet.Features.Select(i => i.Geometry));
+                    }
+                    else
+                    {
+                        //bogus point 
+                        return new MapPointBuilder(0, 0).ToGeometry();
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    //bogus point 
-                    return new MapPointBuilder(0, 0).ToGeometry();
+                    MessageBox.Show(string.Format("Unable to process the Income data. The Server returned the following message: {0}", ex.Message, "Income Error"));
+                    return null;
                 }
             }
             return null;
         }
 
+        /// <summary>
+        /// Queries the Tapestry layer for all the tapestry polygons that intersect Demo and Income data
+        /// </summary>
+        /// <param name="mapView"></param>
+        /// <param name="geom"></param>
+        /// <returns></returns>
         public async Task<QueryResult> GetTapestry(MapView mapView, Geometry geom)
         {
-            //tapestry layer query
-            QueryTask tapestryQueryTask = new QueryTask(
-                new Uri("http://services.arcgisonline.com/arcgis/rest/services/Demographics/USA_Tapestry/MapServer/1"));
-            Query tapestryQuery = new Query(geom, SpatialRelationship.Intersects)
+            try { 
+                //tapestry layer query
+                QueryTask tapestryQueryTask = new QueryTask(
+                    new Uri("http://services.arcgisonline.com/arcgis/rest/services/Demographics/USA_Tapestry/MapServer/1"));
+                Query tapestryQuery = new Query(geom, SpatialRelationship.Intersects)
+                {
+                    OutFields = { "DOMTAP", "OBJECTID", "TAPSEGNAM" }, //fields needed to create URLs and labels
+                    ReturnGeometry = true,
+                    OutSpatialReference = mapView.SpatialReference
+                };
+                var tapestryResult = await tapestryQueryTask.ExecuteAsync(tapestryQuery);
+                return tapestryResult;
+            }
+            catch (Exception ex)
             {
-                OutFields = { "DOMTAP", "OBJECTID", "TAPSEGNAM" },
-                ReturnGeometry = true,
-                OutSpatialReference = mapView.SpatialReference
-            };
-            var tapestryResult = await tapestryQueryTask.ExecuteAsync(tapestryQuery);
-            return tapestryResult;
+                MessageBox.Show(string.Format("Unable to process Tapestry data. The Server returned the following message: {0}", ex.Message, "Tapestry Error"));
+                return null;
+            }
         }
 
         // click event for Submit button
@@ -317,15 +343,15 @@ namespace HelpMeMove.ViewModels
                 if (!(graphicsOverlay.Graphics.Count == 0))
                     graphicsOverlay.Graphics.Clear();
 
-
+                //get demo and income data
+                List<Geometry> PreFinalGeometryList = new List<Geometry>();
                 var demoResult = await GetDemographics(mapView);
                 var incomePoly = await GetIncome(mapView);
-
-                List<Geometry> PreFinalGeometryList = new List<Geometry>();
 
                 if (demoResult == null && incomePoly == null) //user has not selected anything
                 {
                     MessageBox.Show("Your search returned no results. Try changing your selections");
+                    ProgressOverlayVisibility = Visibility.Collapsed;
                     return;
                 }
                 else if (demoResult == null && incomePoly != null) //if user hasn't selected demographic data
@@ -384,10 +410,15 @@ namespace HelpMeMove.ViewModels
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Attribute Query Sample");
+                MessageBox.Show(string.Format("An error has occured and your information could not be processed: {0}", ex.Message, 
+                    "Data Processing Error"));
             }
         }
 
+        /// <summary>
+        /// Method sets the same label renderer on the graphics overlay as ESRI's tapestry layer
+        /// </summary>
+        /// <param name="graphicsOverlay">MapView's graphic layer to display tapestry data</param>
         public async void SetRenderer(GraphicsOverlay graphicsOverlay)
         {
             FeatureLayer layer = new FeatureLayer(
@@ -395,7 +426,6 @@ namespace HelpMeMove.ViewModels
 
             await layer.InitializeAsync();
             graphicsOverlay.Renderer = layer.Renderer;
-
         }
 
         #region INotifyPropertyChanged implementation
@@ -410,18 +440,17 @@ namespace HelpMeMove.ViewModels
         #endregion
     }
 
+    /// <summary>
+    /// Class defines needed information for each tapestry and generates url
+    /// </summary>
     public class Tapestry
     {
         public int ID { get; set; }
         public string Name { get; set; }
-
-        private string pdfUrl;
-
         public string PdfUrl
         {
             get { return String.Format("http://www.esri.com/~/media/Files/Pdfs/data/esri_data/pdfs/tapestry-singles/segment{0}.pdf", ID); }
         }
-
     }
 
     //setting up button command handler
@@ -452,6 +481,9 @@ namespace HelpMeMove.ViewModels
         }
     }
 
+    /// <summary>
+    /// Contains all survey properties and handles parsing responses from user
+    /// </summary>
     public class SurveyResult
     {
         public string Gender { get; set; }
@@ -460,6 +492,10 @@ namespace HelpMeMove.ViewModels
         public string HouseholdSize { get; set; }
         public string HouseholdIncome { get; set; }
 
+        /// <summary>
+        /// Creates query string for the income query from user input
+        /// </summary>
+        /// <returns>Income data query string</returns>
         public string CreateIncomeQueryString()
         {
             StringBuilder qsb = new StringBuilder();
@@ -497,6 +533,10 @@ namespace HelpMeMove.ViewModels
             return qsb.ToString();
         }
 
+        /// <summary>
+        /// Creates query string for the demographics query from user input
+        /// </summary>
+        /// <returns>Demo data query string</returns>
         public string CreateDemoQueryString()
         {
             StringBuilder qsb = new StringBuilder();
